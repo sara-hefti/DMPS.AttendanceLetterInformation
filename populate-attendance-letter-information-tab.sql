@@ -14,10 +14,9 @@ Multiple Steps:
 3. For students who are missing attendance data for their Primary enrollment in Margi Table, calculate attendance data for primary enrollment using ch_mins table
 4. For students who are missing attendance data for their Secondary enrollment in Margi Table, calculate attendance data for secondary enrollment using ch_mins table
 
-select * from #odds order by studentNumber
-select * from #students_secondary_calc
-select * from #students_primary_calc
+Set up as SQL Job: Attendance Letter Information tab update
 
+12/16/2024 - Optimize script
 ********************/
 
 if Object_ID('tempdb..#odds') is not Null drop table #odds
@@ -259,12 +258,12 @@ if Object_ID('tempdb..#students_primary_calc') is not Null drop table #students_
 				cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate
 			into #students_primary_calc
 			from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251 x
-			inner join #all a on a.studentNumber = x.studentNumber
+			inner join (select studentNumber, lastname, firstname from #all where school is null) a on a.studentNumber = x.studentNumber
 			inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
 			where e.serviceType='P'
 			and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
 			and e.endDate is null
-			and a.studentNumber in (select studentNumber from #all where school is null)
+			--and a.studentNumber in (select studentNumber from #all where school is null)
 			group by x.personId, a.studentNumber, a.lastname, a.firstname, x.school
 
 
@@ -363,12 +362,12 @@ if Object_ID('tempdb..#students_secondary_calc') is not Null drop table #student
 				cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
 			into #students_secondary_calc
 			from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251 x
-			inner join #all a on a.studentNumber = x.studentNumber
+			inner join (select studentNumber, lastname, firstname from #all where secondschoolId is null) a on a.studentNumber = x.studentNumber
 			inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
 			where e.serviceType='S'
 			and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
 			and e.endDate is null
-			and a.studentNumber in (select studentNumber from #all where secondschoolId is null)
+			--and a.studentNumber in (select studentNumber from #all where secondschoolId is null)
 			group by x.personId, a.studentNumber, a.lastname, a.firstname, x.school
 
 

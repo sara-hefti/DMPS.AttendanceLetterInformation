@@ -73,3 +73,24 @@ where attributeId IN (
 						where object = 'Attendance Letter Information'
 						)
 and value is null
+
+
+-- Back up Attendance Letter Information tab data
+select *
+into workingDB.dbo.AttendanceLetterInformation_10062025
+from dbo.customStudent
+where attributeId IN (
+						select attributeId
+						from dbo.campusAttribute
+						where object = 'Attendance Letter Information'
+						)
+
+-- Query Attendance Letter Information tab data | wipe out data
+delete
+-- select distinct personId
+from dbo.customStudent
+where attributeId IN (
+						select attributeId
+						from dbo.campusAttribute
+						where object = 'Attendance Letter Information'
+						)

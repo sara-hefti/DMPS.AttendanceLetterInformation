@@ -17,10 +17,31 @@ Multiple Steps:
 Set up as SQL Job: Attendance Letter Information tab update
 
 12/16/2024 - Optimize script
+2/24/2025  - Use Lincoln High + today to determine current term (1 or 2) - @current_term
+		   - populate primarySchoolId and secondarySchoolId for steps 3 and 4.
+		   - use @term_startDate, @term_endDate to pull attendance records from the "ch" table for current term in steps 3 and 4.
+11/20/2025 - Change table from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251  to 20261 table
 ********************/
 
 if Object_ID('tempdb..#odds') is not Null drop table #odds
 if Object_ID('tempdb..#all') is not Null drop table #all
+
+declare @termId int = (
+										select t.termId
+										from term t
+										inner join termschedule ts on ts.termScheduleId=t.termScheduleId
+										inner join scheduleStructure ss on ss.structureId=ts.structureId
+										inner join calendar cal on cal.calendarId=ss.calendarId
+										inner join school sch on sch.schoolId=cal.schoolId
+										where sch.name = 'Lincoln High'
+										and cal.endYear= (select endYear from schoolyear where active=1)
+										and getDate() between t.startDate and t.endDate )
+
+declare @current_term varchar(1) = (select name from term where termId=@termId)
+declare @term_startDate datetime = (select startDate from term where termID=@termId)
+declare @term_endDate datetime = (select endDate from term where termID=@termId)
+
+
 
 -- get data into full table
 select studentNumber, lastname, firstname, school, primeschoolId, ninedateprimary, ABpercentprime, AbsentDaysPrime, scheduleDayPrime, 
@@ -29,6 +50,11 @@ into #all
 from [desmoinesia.infinitecampus.org,7772].dev2.dbo.ch_MargiAttendance_tbl
 where (primeschoolId is not null or secondschoolId is not null)
 
+/*
+select *
+from #all 
+where studentNumber IN (709535, 709674 , 690976 )
+*/
 
 
 -- collects the "odds" - these are students with >1 record in the table; there should only be one record per student
@@ -83,6 +109,8 @@ from (
 
 
 	
+	print '#all collected'
+
 ------------------------------------------------------------------------------------
 -- if student already has the attribute but the value is different, update
 ------------------------------------------------------------------------------------
@@ -91,6 +119,12 @@ update cs
 		cs.date= cast(getDate() as smalldatetime)
 --select i.lastname, i.firstname, x.*, cs.*
 from (
+		
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #all
+		
+		union
+
 		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
 		from #all
 
@@ -150,12 +184,13 @@ from (
 		from #all
 
 	) x
+--inner join #all on #all.studentNumber=x.studentNumber and (#all.primeschoolId is not null or #all.secondschoolId is not null)
 inner join person p on p.studentNumber=x.studentNumber
 inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where ISNULL(cs.value,'') <> x.value
 
-
+print 'data updated'
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -164,6 +199,12 @@ INSERT INTO customStudent (personId, attributeId, value, date, districtId)
 select distinct i.personId, x.attributeId, x.value, cast(getDate() as smalldatetime), (select districtId from campusVersion)
 --select i.lastname, i.firstname, x.*, cs.*
 from (
+		
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #all
+
+		union
+
 		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
 		from #all
 
@@ -222,22 +263,19 @@ from (
 		select studentNumber, 4129 attributeId, cast(ScheduleDaysSecond as varchar(20)), 'ScheduleDaySecond'
 		from #all
 
-		union
-
-		select studentNumber, 4132 attributeId, '1', 'CurrentTerm'
-		from #all
 
 	) x
+--inner join #all on #all.studentNumber=x.studentNumber and (#all.primeschoolId is not null or #all.secondschoolId is not null)
 inner join person p on p.studentNumber=x.studentNumber
 inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where cs.attributeId is null and x.value is not null
 
-
+print 'data inserted'
 
 
 /*****************************************************************************************
--- If student is missing attendance data for their Primary enrollment in Margi Table:
+-- If student is missing attendance data for their Primary enrollment in Margi Table OR not in the Margi table at all:
 
 -- calculate attendance data for primary enrollment using ch_mins table
 -- run update / insert statements to populate to Attendance Letter Info tab
@@ -245,36 +283,90 @@ where cs.attributeId is null and x.value is not null
 
 *****************************************************************************************/
 
+
 if Object_ID('tempdb..#students_primary_calc') is not Null drop table #students_primary_calc
 
-			select  
-				x.personId, 
-				a.studentNumber,
-				a.lastname, 
-				a.firstname, 
-				x.school,
-				cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
-				cast(max(dayno) as varchar(3)) days_scheduled, 
-				cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate
-			into #students_primary_calc
-			from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251 x
-			inner join (select studentNumber, lastname, firstname from #all where school is null) a on a.studentNumber = x.studentNumber
-			inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
-			where e.serviceType='P'
-			and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
-			and e.endDate is null
-			--and a.studentNumber in (select studentNumber from #all where school is null)
-			group by x.personId, a.studentNumber, a.lastname, a.firstname, x.school
+select y.*
+into #students_primary_calc
+from (	-- Students in Margi table with no data for primary enrollment
+				select  
+					personId, 
+					studentNumber,
+					school,
+					schoolId,
+					cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
+					cast(max(dayno) as varchar(3)) days_scheduled, 
+					cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate,
+					cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
+					from (
+							select x.personId,
+								   x.studentNumber,
+								   x.school,
+								   sch.schoolId,
+								   x.totalschedule_byDay_absences,
+								   x.date,
+								   row_number() over (partition by x.studentNumber, x.school order by date) dayno  -- how many days into the current term
+							from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20261 x
+							inner join (select studentNumber, lastname, firstname from #all where school is null) a on a.studentNumber = x.studentNumber
+							inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
+							inner join school sch on sch.name= case when x.school IN ('Academy', 'Campus') then 'Central' else x.school end
+							where e.serviceType='P'
+							and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
+							and e.endDate is null
+							and x.date between @term_startDate and @term_endDate
+							) y
+					group by personId, studentNumber, school, schoolId
+				
+				union
 
+				-- students who are not in Margi table at all (pull Primary enrollment)
+				select  
+					personId, 
+					studentNumber,
+					school,
+					schoolId,
+					cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
+					cast(max(dayno) as varchar(3)) days_scheduled, 
+					cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate,
+					cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
+					from (
+							select x.personId,
+								   x.studentNumber,
+								   x.school,
+								   sch.schoolId,
+								   x.totalschedule_byDay_absences,
+								   x.date,
+								   row_number() over (partition by x.studentNumber, x.school order by date) dayno  -- how many days into the current term
+							from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20261 x
+							inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
+							inner join school sch on sch.name= case when x.school IN ('Academy', 'Campus') then 'Central' else x.school end
+							where e.serviceType='P'
+							and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
+							and e.endDate is null
+							and x.studentNumber not in (select studentNumber from #all)
+							and x.date between @term_startDate and @term_endDate
+							) y
+					group by personId, studentNumber, school, schoolId
+				) y
 
 
 
 update cs
 	set cs.value=x.value,
 		cs.date= cast(getDate() as smalldatetime)
---select i.lastname, i.firstname, x.*, cs.*
+-- select  x.*, cs.*
 from (
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #students_primary_calc
+
+		union
+
 		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
+		from #students_primary_calc
+
+		union
+
+		select studentNumber, 4130 attributeId, cast(schoolId as varchar(3)), 'PrimeSchoolID'
 		from #students_primary_calc
 
 		union
@@ -298,6 +390,7 @@ inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where ISNULL(cs.value,'') <> x.value
 
+print '#students_primary_calc updated'
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -306,7 +399,17 @@ INSERT INTO customStudent (personId, attributeId, value, date, districtId)
 select distinct i.personId, x.attributeId, x.value, cast(getDate() as smalldatetime), (select districtId from campusVersion)
 -- select i.lastname, i.firstname, x.*, cs.*
 from (
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #students_primary_calc
+
+		union
+
 		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
+		from #students_primary_calc
+
+		union
+
+		select studentNumber, 4130 attributeId, cast(schoolId as varchar(3)), 'PrimeSchoolID'
 		from #students_primary_calc
 
 		union
@@ -324,10 +427,6 @@ from (
 		select studentNumber, 4124 attributeId, days_scheduled, 'ScheduleDayPrime'
 		from #students_primary_calc
 
-		union
-
-		select studentNumber, 4132 attributeId, '1', 'CurrentTerm'
-		from #students_primary_calc
 
 	) x
 inner join person p on p.studentNumber=x.studentNumber
@@ -335,13 +434,15 @@ inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where cs.attributeId is null and x.value is not null
 
-
+print '#students_primary_calc inserted'
 
 
 /*****************************************************************************************
--- If student is missing attendance data for their Secondary enrollment in Margi Table:
+-- If student is missing attendance data for their Secondary enrollment in Margi Table OR not in the Margi table at all (and has secondary enrollment):
 
 -- calculate attendance data for Secondary enrollment using ch_mins table
+		- use @term_startDate and @term_endDate to get attendance data for current term only
+		- re-calculate dayno to get days for current term only
 -- run update / insert statements to populate to Attendance Letter Info tab
 
 
@@ -349,27 +450,70 @@ where cs.attributeId is null and x.value is not null
 
 if Object_ID('tempdb..#students_secondary_calc') is not Null drop table #students_secondary_calc
 
+select y.*
+into #students_secondary_calc
+from (	-- Students in Margi table with no data for secondary enrollment
+				select  
+					personId, 
+					studentNumber,
+					school,
+					schoolId,
+					cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
+					cast(max(dayno) as varchar(3)) days_scheduled, 
+					cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate,
+					cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
+					from (
+							select x.personId,
+								   x.studentNumber,
+								   x.school,
+								   sch.schoolId,
+								   x.totalschedule_byDay_absences,
+								   x.date,
+								   row_number() over (partition by x.studentNumber, x.school order by date) dayno  -- how many days into the current term
+							from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20261 x
+							inner join (select studentNumber, lastname, firstname from #all where secondschoolId is null) a on a.studentNumber = x.studentNumber
+							inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
+							inner join school sch on sch.name= case when x.school IN ('Academy', 'Campus') then 'Central' else x.school end
+							where e.serviceType='S'
+							and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
+							and e.endDate is null
+							and x.date between @term_startDate and @term_endDate
+							) y
+					group by personId, studentNumber, school, schoolId
+				
+				union
 
-			select  
-				x.personId, 
-				a.studentNumber,
-				a.lastname, 
-				a.firstname, 
-				x.school,
-				cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
-				cast(max(dayno) as varchar(3)) days_scheduled, 
-				cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate,
-				cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
-			into #students_secondary_calc
-			from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251 x
-			inner join (select studentNumber, lastname, firstname from #all where secondschoolId is null) a on a.studentNumber = x.studentNumber
-			inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
-			where e.serviceType='S'
-			and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
-			and e.endDate is null
-			--and a.studentNumber in (select studentNumber from #all where secondschoolId is null)
-			group by x.personId, a.studentNumber, a.lastname, a.firstname, x.school
+				-- students who are not in Margi table at all (pull Secondary enrollment)
+				select  
+					personId, 
+					studentNumber,
+					school,
+					schoolId,
+					cast(cast(sum(totalschedule_byDay_absences) as decimal(6,2)) as varchar(10)) absent_days, 
+					cast(max(dayno) as varchar(3)) days_scheduled, 
+					cast(cast(100 - ((sum(totalschedule_byDay_absences) / max(dayno)) *100) as decimal(6,2)) as varchar(6)) + '%' att_rate,
+					cast(cast(sum(totalschedule_byDay_absences) / max(dayno) * 100 as decimal(6,2)) as varchar(6)) + '%' absent_pct
+					from (
+							select x.personId,
+								   x.studentNumber,
+								   x.school,
+								   sch.schoolId,
+								   x.totalschedule_byDay_absences,
+								   x.date,
+								   row_number() over (partition by x.studentNumber, x.school order by date) dayno  -- how many days into the current term
+							from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20261 x
+							inner join enrollment e on e.personId=x.personId and e.calendarId=x.calendarId 
+							inner join school sch on sch.name= case when x.school IN ('Academy', 'Campus') then 'Central' else x.school end
+							where e.serviceType='S'
+							and e.startDate IN (select max(startDate) from enrollment where calendarId=e.calendarId and personId=e.personId and serviceType=e.serviceType)
+							and e.endDate is null
+							and x.studentNumber not in (select studentNumber from #all)
+							and x.date between @term_startDate and @term_endDate
+							) y
+					group by personId, studentNumber, school, schoolId
+				) y
 
+			-- select * from #students_secondary_calc where studentNumber = '647897'
 
 
 update cs
@@ -377,7 +521,17 @@ update cs
 		cs.date= cast(getDate() as smalldatetime)
 -- select i.lastname, i.firstname, x.*, cs.*
 from (
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #students_secondary_calc
+
+		union		
+		
 		select studentNumber, 4539 attributeId, school value, 'SecondarySchool' element
+		from #students_secondary_calc
+		
+		union		
+		
+		select studentNumber, 4131 attributeId, cast(schoolId as varchar(3)), 'SecondSchoolID'
 		from #students_secondary_calc
 
 		union
@@ -401,6 +555,7 @@ inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where ISNULL(cs.value,'') <> x.value
 
+print '#students_secondary_calc updated'
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -409,7 +564,17 @@ INSERT INTO customStudent (personId, attributeId, value, date, districtId)
 select distinct i.personId, x.attributeId, x.value, cast(getDate() as smalldatetime), (select districtId from campusVersion)
 -- select i.lastname, i.firstname, x.*, cs.*
 from (
+		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
+		from #students_secondary_calc
+
+		union	
+
 		select studentNumber, 4539 attributeId, school value, 'SecondarySchool' element
+		from #students_secondary_calc
+
+		union		
+		
+		select studentNumber, 4131 attributeId, cast(schoolId as varchar(3)), 'SecondSchoolID'
 		from #students_secondary_calc
 
 		union
@@ -427,13 +592,12 @@ from (
 		select studentNumber, 4129 attributeId, days_scheduled, 'ScheduleDaySecond'
 		from #students_secondary_calc
 
-		union
-
-		select studentNumber, 4132 attributeId, '1', 'CurrentTerm'
-		from #students_secondary_calc
 
 	) x
 inner join person p on p.studentNumber=x.studentNumber
 inner join [identity] i on i.identityId=p.currentIdentityId
 left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
 where cs.attributeId is null and x.value is not null
+
+
+print '#students_secondary_calc inserted'

@@ -21,7 +21,21 @@ Set up as SQL Job: Attendance Letter Information tab update
 		   - populate primarySchoolId and secondarySchoolId for steps 3 and 4.
 		   - use @term_startDate, @term_endDate to pull attendance records from the "ch" table for current term in steps 3 and 4.
 11/20/2025 - Change table from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251  to 20261 table
+2/24/2026  - Delete the Attendance Letter Information tab for all students prior to running import
+		   - Comment out the customstudent update scripts as we will just be inserting now
+
 ********************/
+
+
+-- Wipe out Attendance Letter Information tab data
+delete
+from dbo.customStudent
+where attributeId IN (
+						select attributeId
+						from dbo.campusAttribute
+						where object = 'Attendance Letter Information'
+						)
+
 
 if Object_ID('tempdb..#odds') is not Null drop table #odds
 if Object_ID('tempdb..#all') is not Null drop table #all
@@ -49,12 +63,6 @@ select studentNumber, lastname, firstname, school, primeschoolId, ninedateprimar
 into #all
 from [desmoinesia.infinitecampus.org,7772].dev2.dbo.ch_MargiAttendance_tbl
 where (primeschoolId is not null or secondschoolId is not null)
-
-/*
-select *
-from #all 
-where studentNumber IN (709535, 709674 , 690976 )
-*/
 
 
 -- collects the "odds" - these are students with >1 record in the table; there should only be one record per student
@@ -111,6 +119,8 @@ from (
 	
 	print '#all collected'
 
+
+	/*
 ------------------------------------------------------------------------------------
 -- if student already has the attribute but the value is different, update
 ------------------------------------------------------------------------------------
@@ -191,6 +201,7 @@ left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attrib
 where ISNULL(cs.value,'') <> x.value
 
 print 'data updated'
+*/
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -274,6 +285,8 @@ where cs.attributeId is null and x.value is not null
 print 'data inserted'
 
 
+
+
 /*****************************************************************************************
 -- If student is missing attendance data for their Primary enrollment in Margi Table OR not in the Margi table at all:
 
@@ -350,7 +363,7 @@ from (	-- Students in Margi table with no data for primary enrollment
 				) y
 
 
-
+/*
 update cs
 	set cs.value=x.value,
 		cs.date= cast(getDate() as smalldatetime)
@@ -391,6 +404,7 @@ left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attrib
 where ISNULL(cs.value,'') <> x.value
 
 print '#students_primary_calc updated'
+*/
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -513,9 +527,9 @@ from (	-- Students in Margi table with no data for secondary enrollment
 					group by personId, studentNumber, school, schoolId
 				) y
 
-			-- select * from #students_secondary_calc where studentNumber = '647897'
 
 
+/*
 update cs
 	set cs.value=x.value,
 		cs.date= cast(getDate() as smalldatetime)
@@ -556,6 +570,7 @@ left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attrib
 where ISNULL(cs.value,'') <> x.value
 
 print '#students_secondary_calc updated'
+*/
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.

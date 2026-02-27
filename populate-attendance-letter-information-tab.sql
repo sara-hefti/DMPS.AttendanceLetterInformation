@@ -23,7 +23,7 @@ Set up as SQL Job: Attendance Letter Information tab update
 11/20/2025 - Change table from [desmoinesia.infinitecampus.org,7772].dev2.dbo.Ch_mins_by_day_comp_20251  to 20261 table
 2/24/2026  - Delete the Attendance Letter Information tab for all students prior to running import
 		   - Comment out the customstudent update scripts as we will just be inserting now
-
+2/27/2026  - For the "#students_secondary_calc" section: Campus and Academy are now combined to one school; previously two entities that were causing ghosted records.
 ********************/
 
 
@@ -119,89 +119,6 @@ from (
 	
 	print '#all collected'
 
-
-	/*
-------------------------------------------------------------------------------------
--- if student already has the attribute but the value is different, update
-------------------------------------------------------------------------------------
-update cs
-	set cs.value=x.value,
-		cs.date= cast(getDate() as smalldatetime)
---select i.lastname, i.firstname, x.*, cs.*
-from (
-		
-		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
-		from #all
-		
-		union
-
-		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
-		from #all
-
-		union
-
-		select studentNumber, 4130 attributeId, cast(primeschoolId as varchar(3)), 'PrimeSchoolID'
-		from #all
-
-		union
-
-		select studentNumber, 4125 attributeId, convert(varchar(10), NineDatePrimary, 101), 'NineDatePrimary'
-		from #all
-
-		union
-
-		select studentNumber, 4122 attributeId, cast(cast(Abpercentprime * 100 as decimal(6,2)) as varchar(6)) + '%', 'ABpercentprime'
-		from #all
-
-		union
-
-		select studentNumber, 4123 attributeId, cast(cast(AbsentDaysPrime as decimal(6,2)) as varchar(10)), 'AbsentDaysPrime'
-		from #all
-
-		union
-
-		select studentNumber, 4124 attributeId, cast(ScheduleDayPrime as varchar(3)), 'ScheduleDayPrime'
-		from #all
-
-		union
-
-		select studentNumber, 4539 attributeId, secondaryschool, 'SecondarySchool'
-		from #all
-
-		union
-
-		select studentNumber, 4131 attributeId, cast(secondschoolId as varchar(3)), 'SecondSchoolID'
-		from #all
-
-		union
-
-		select studentNumber, 4126 attributeId, convert(varchar(10), NineDateSecondary, 101), 'NineDateSecondary'
-		from #all
-
-		union
-
-		select studentNumber, 4127 attributeId, cast(cast(ABPercentSecond * 100 as decimal(7,2)) as varchar(6)) + '%', 'ABPercentSecond'
-		from #all
-
-		union
-
-		select studentNumber, 4128 attributeId, cast(cast(AbsentDaysSecond as decimal(6,2)) as varchar(10)), 'AbsentDaysSecond'  
-		from #all
-
-		union
-
-		select studentNumber, 4129 attributeId, cast(ScheduleDaysSecond as varchar(20)), 'ScheduleDaySecond'
-		from #all
-
-	) x
---inner join #all on #all.studentNumber=x.studentNumber and (#all.primeschoolId is not null or #all.secondschoolId is not null)
-inner join person p on p.studentNumber=x.studentNumber
-inner join [identity] i on i.identityId=p.currentIdentityId
-left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
-where ISNULL(cs.value,'') <> x.value
-
-print 'data updated'
-*/
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
@@ -363,49 +280,6 @@ from (	-- Students in Margi table with no data for primary enrollment
 				) y
 
 
-/*
-update cs
-	set cs.value=x.value,
-		cs.date= cast(getDate() as smalldatetime)
--- select  x.*, cs.*
-from (
-		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
-		from #students_primary_calc
-
-		union
-
-		select studentNumber, 4134 attributeId, school value, 'PrimarySchool' element
-		from #students_primary_calc
-
-		union
-
-		select studentNumber, 4130 attributeId, cast(schoolId as varchar(3)), 'PrimeSchoolID'
-		from #students_primary_calc
-
-		union
-
-		select studentNumber, 4122 attributeId, att_rate, 'ABpercentprime'
-		from #students_primary_calc
-
-		union
-
-		select studentNumber, 4123 attributeId, absent_days, 'AbsentDaysPrime'
-		from #students_primary_calc
-
-		union
-
-		select studentNumber, 4124 attributeId, days_scheduled, 'ScheduleDayPrime'
-		from #students_primary_calc
-
-	) x
-inner join person p on p.studentNumber=x.studentNumber
-inner join [identity] i on i.identityId=p.currentIdentityId
-left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
-where ISNULL(cs.value,'') <> x.value
-
-print '#students_primary_calc updated'
-*/
-
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.
 ------------------------------------------------------------------------------------
@@ -479,7 +353,7 @@ from (	-- Students in Margi table with no data for secondary enrollment
 					from (
 							select x.personId,
 								   x.studentNumber,
-								   x.school,
+								   sch.name school,
 								   sch.schoolId,
 								   x.totalschedule_byDay_absences,
 								   x.date,
@@ -510,7 +384,7 @@ from (	-- Students in Margi table with no data for secondary enrollment
 					from (
 							select x.personId,
 								   x.studentNumber,
-								   x.school,
+								   sch.name school,
 								   sch.schoolId,
 								   x.totalschedule_byDay_absences,
 								   x.date,
@@ -528,49 +402,6 @@ from (	-- Students in Margi table with no data for secondary enrollment
 				) y
 
 
-
-/*
-update cs
-	set cs.value=x.value,
-		cs.date= cast(getDate() as smalldatetime)
--- select i.lastname, i.firstname, x.*, cs.*
-from (
-		select studentNumber, 4132 attributeId, @current_term value, 'CurrentTerm' element
-		from #students_secondary_calc
-
-		union		
-		
-		select studentNumber, 4539 attributeId, school value, 'SecondarySchool' element
-		from #students_secondary_calc
-		
-		union		
-		
-		select studentNumber, 4131 attributeId, cast(schoolId as varchar(3)), 'SecondSchoolID'
-		from #students_secondary_calc
-
-		union
-
-		select studentNumber, 4127 attributeId, att_rate, 'ABPercentSecond'
-		from #students_secondary_calc
-
-		union
-
-		select studentNumber, 4128 attributeId, absent_days, 'AbsentDaysSecond'  
-		from #students_secondary_calc
-
-		union
-
-		select studentNumber, 4129 attributeId, days_scheduled, 'ScheduleDaySecond'
-		from #students_secondary_calc
-
-	) x
-inner join person p on p.studentNumber=x.studentNumber
-inner join [identity] i on i.identityId=p.currentIdentityId
-left join customStudent cs on cs.personId=p.personId and cs.attributeID=x.attributeId
-where ISNULL(cs.value,'') <> x.value
-
-print '#students_secondary_calc updated'
-*/
 
 ------------------------------------------------------------------------------------
 -- if student does not have the attribute, INSERT it.

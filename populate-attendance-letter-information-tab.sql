@@ -24,6 +24,7 @@ Set up as SQL Job: Attendance Letter Information tab update
 2/24/2026  - Delete the Attendance Letter Information tab for all students prior to running import
 		   - Comment out the customstudent update scripts as we will just be inserting now
 2/27/2026  - For the "#students_secondary_calc" section: Campus and Academy are now combined to one school; previously two entities that were causing ghosted records.
+4/20/2026  - For #odds, count distinct school to determine if student has >1 primary school
 ********************/
 
 
@@ -73,7 +74,7 @@ from #all
 where  studentNumber IN (select studentNumber
 						from #all
 						group by studentNumber
-						having count(studentNumber) >1
+						having count(distinct school) >1
 						)
 order by lastname, firstname
 
